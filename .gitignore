@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IntelliJ / Java
+.idea/
+*.iml
+out/
+target/
+*.log
+**/target/
+
+# VSCode
+.vscode/
+
+# Node / React
+node_modules/
+dist/
+build/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Firmware secrets
+**/config.h
+
+# Arduino build outputs
+**/*.bin
+**/*.elf
+**/*.map
+**/build/
