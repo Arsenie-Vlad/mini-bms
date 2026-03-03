@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart } from "recharts";
 
 const API = "http://localhost:8080";
 const ROOM = "room1";
@@ -18,6 +18,47 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [rangeMin, setRangeMin] = useState(5);
 
+  const [metric, setMetric] = useState("temp"); 
+
+  const metricLabels = {
+  temp: "Temperature (°C)",
+  lux: "Lux",
+  power: "Power (W)"
+  };
+
+  const metricColors = {
+  temp: "#ef4444",   
+  lux: "#facc15",    
+  power: "#8b5cf6"   
+};
+
+  const CustomToolTip = ({active, payload, label}) => {
+    if(active && payload && payload.length) {
+      const value = payload[0]?.value;
+
+      return (
+        <div
+          style={{
+            background: "#1e293b",
+            padding: "10px 14px",
+            borderRadius: "8px",
+            border: "1px solid #334155",
+            color: "white"
+          }}
+        >
+          <div style={{ fontWeight: "bold", marginBottom: 6 }}>
+            {label}
+          </div>
+
+          <div style={{ color: "#60a5fa" }}>
+            {metricLabels[metric]}: {value}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   // (opțional) seed inițial ca să nu fie ecran gol până vine primul WS
   async function fetchLastOnce() {
     const res = await fetch(`${API}/api/telemetry/last?roomId=${ROOM}`);
@@ -28,7 +69,6 @@ export default function App() {
   useEffect(() => {
     let alive = true;
 
-    // Seed inițial (o singură cerere, nu polling)
     (async () => {
       try {
         const last = await fetchLastOnce();
@@ -65,13 +105,10 @@ export default function App() {
       try {
         const t = JSON.parse(ev.data);
 
-        // filtrează doar camera dorită
         if (t.roomId && t.roomId !== ROOM) return;
 
-        // update live card
         setData(t);
 
-        // point pentru chart
         const ms = toMs(t.ts);
         const point = {
           time: new Date(ms).toLocaleTimeString(),
@@ -84,10 +121,8 @@ export default function App() {
         setHistory((prev) => {
           const cutoff = Date.now() - rangeMin * 60 * 1000;
 
-          // păstrează doar punctele din interval
           const kept = prev.filter((p) => (p._ms ?? 0) >= cutoff);
 
-          // evită duplicate pe același timestamp
           const last = kept[kept.length - 1];
           if (last && last._ms === point._ms) {
             return [...kept.slice(0, -1), point];
@@ -162,14 +197,28 @@ export default function App() {
 
           {/* GRAFIC (fără ResponsiveContainer ca să evităm width(-1)) */}
           <div style={{ marginTop: 24 }}>
-            <h2>Temperature history</h2>
+            <h2>Charts</h2>
+            <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setMetric("temp")}>Temperature (°C)</button>
+              <button onClick={() => setMetric("lux")}>Lux</button>
+              <button onClick={() => setMetric("power")}>Power (W)</button>
+            </div>
+
             <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10, overflowX: "auto" }}>
               <LineChart width={900} height={300} data={history.map(({ _ms, ...rest }) => rest)}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="5 5" visibility={false}/>
                 <XAxis dataKey="time" />
                 <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="temp" />
+                <Tooltip content={<CustomToolTip />} />
+                <Line
+                  type="monotone"
+                  dataKey={metric}
+                  name={metricLabels[metric]}
+                  stroke={metricColors[metric]}
+                  strokeWidth={2}
+                  dot={true}
+                />
+                <Legend></Legend>
               </LineChart>
             </div>
           </div>
