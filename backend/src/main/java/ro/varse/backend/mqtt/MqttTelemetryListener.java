@@ -3,11 +3,12 @@ package ro.varse.backend.mqtt;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import ro.varse.backend.domain.Telemetry;
 import ro.varse.backend.repository.TelemetryRepository;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import ro.varse.backend.ws.TelemetryWsHandler;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -18,7 +19,8 @@ import java.time.Instant;
 public class MqttTelemetryListener {
 
     private final TelemetryRepository repo;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final TelemetryWsHandler wsHandler;
+    private final ObjectMapper mapper;   // Injectat de Spring
 
     @Value("${mqtt.host}")
     private String mqttHost;
@@ -31,8 +33,14 @@ public class MqttTelemetryListener {
 
     private MqttClient client;
 
-    public MqttTelemetryListener(TelemetryRepository repo) {
+    public MqttTelemetryListener(
+            TelemetryRepository repo,
+            TelemetryWsHandler wsHandler,
+            ObjectMapper mapper
+    ) {
         this.repo = repo;
+        this.wsHandler = wsHandler;
+        this.mapper = mapper;
     }
 
     @PostConstruct
@@ -42,30 +50,55 @@ public class MqttTelemetryListener {
         MqttConnectOptions options = new MqttConnectOptions();
         options.setAutomaticReconnect(true);
         options.setCleanSession(true);
+        options.setConnectionTimeout(10);
+        options.setKeepAliveInterval(20);
 
-        client.setCallback(new MqttCallback() {
+        client.setCallback(new MqttCallbackExtended() {
+
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                System.out.println("MQTT connectComplete (reconnect=" + reconnect + ")");
+                try {
+                    client.subscribe(topicTelemetry, 0);
+                    System.out.println("MQTT subscribed to " + topicTelemetry);
+                } catch (Exception e) {
+                    System.out.println("MQTT subscribe failed: " + e.getMessage());
+                }
+            }
+
             @Override
             public void connectionLost(Throwable cause) {
-                System.out.println("MQTT connection lost: " + cause.getMessage());
+                System.out.println("MQTT connection lost: " + cause);
             }
 
             @Override
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
-                saveTelemetryFromJson(payload);
+
+                Telemetry saved = saveTelemetryFromJson(payload);
+
+                // Trimitem Telemetry "curat" către WebSocket
+                wsHandler.broadcast(mapper.writeValueAsString(saved));
             }
 
             @Override
-            public void deliveryComplete(IMqttDeliveryToken token) { }
+            public void deliveryComplete(IMqttDeliveryToken token) {
+            }
         });
 
         client.connect(options);
-        client.subscribe(topicTelemetry, 0);
 
-        System.out.println("MQTT connected to " + mqttHost + ", subscribed to " + topicTelemetry);
+        System.out.println("MQTT connected to " + mqttHost + " (subscribe in connectComplete)");
     }
 
-    private void saveTelemetryFromJson(String payload) throws Exception {
+    public void publish(String topic, String payload) throws Exception {
+        if (client == null || !client.isConnected()) {
+            throw new IllegalStateException("MQTT client not connected");
+        }
+        client.publish(topic, payload.getBytes(StandardCharsets.UTF_8), 0, false);
+    }
+
+    private Telemetry saveTelemetryFromJson(String payload) throws Exception {
         JsonNode n = mapper.readTree(payload);
 
         Telemetry t = new Telemetry();
@@ -86,7 +119,7 @@ public class MqttTelemetryListener {
             if (!act.path("hvac").isMissingNode()) t.setActuatorHvac(act.path("hvac").asBoolean());
         }
 
-        repo.save(t);
+        return repo.save(t);
     }
 
     @PreDestroy

@@ -6,6 +6,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 
+import java.time.Instant;
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/telemetry")
 public class TelemetryController {
@@ -34,5 +37,18 @@ public class TelemetryController {
     @GetMapping("/last")
     public Telemetry last(@RequestParam(defaultValue = "room1") String roomId) {
         return repo.findTopByRoomIdOrderByTsDesc(roomId).orElse(null);
+    }
+
+    @GetMapping("/range")
+    public List<Telemetry> range(
+            @RequestParam(defaultValue = "room1") String roomId,
+            @RequestParam long from,   // epoch seconds
+            @RequestParam long to      // epoch seconds
+    ) {
+        return repo.findByRoomIdAndTsBetweenOrderByTsAsc(
+                roomId,
+                Instant.ofEpochSecond(from),
+                Instant.ofEpochSecond(to)
+        );
     }
 }
