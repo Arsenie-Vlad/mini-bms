@@ -1,229 +1,61 @@
-import { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart } from "recharts";
+import { useState } from "react";
+import Sidebar from "./components/Sidebar/Sidebar";
+import Dashboard from "./components/Dashboard/Dashboard";
+import { useTelemetryWs } from "./hooks/useTelemetryWs";
 
 const API = "http://localhost:8080";
 const ROOM = "room1";
+const MAX_POINTS = 50;
 
-function toMs(ts) {
-  // suport: ISO string, epoch sec, epoch ms
-  if (typeof ts === "number") return ts < 1e12 ? ts * 1000 : ts;
-  return new Date(ts).getTime();
+const metricLabels = { temp: "Temperature (°C)", lux: "Lux (lx)", power: "Power (W)" };
+const metricColors = { temp: "#ef4444", lux: "#facc15", power: "#8b5cf6" };
+
+function PlaceholderPage({ name }) {
+  return (
+    <div className="flex items-center justify-center h-full bg-gray-950">
+      <div className="text-center">
+        <div className="w-16 h-16 rounded-2xl bg-gray-800 flex items-center justify-center mx-auto mb-4">
+          <svg className="w-8 h-8 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-semibold text-gray-400 capitalize">{name}</h2>
+        <p className="text-gray-600 mt-1 text-sm">Coming soon</p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
+  const [activePage, setActivePage] = useState("dashboard");
+  const [metric, setMetric] = useState("temp");
+  const [isStatic, setIsStatic] = useState(false);
 
-  // history = puncte pentru chart (ultimele rangeMin minute, doar din WS)
-  const [history, setHistory] = useState([]);
-  const [rangeMin, setRangeMin] = useState(5);
-
-  const [metric, setMetric] = useState("temp"); 
-
-  const metricLabels = {
-  temp: "Temperature (°C)",
-  lux: "Lux",
-  power: "Power (W)"
-  };
-
-  const metricColors = {
-  temp: "#ef4444",   
-  lux: "#facc15",    
-  power: "#8b5cf6"   
-};
-
-  const CustomToolTip = ({active, payload, label}) => {
-    if(active && payload && payload.length) {
-      const value = payload[0]?.value;
-
-      return (
-        <div
-          style={{
-            background: "#1e293b",
-            padding: "10px 14px",
-            borderRadius: "8px",
-            border: "1px solid #334155",
-            color: "white"
-          }}
-        >
-          <div style={{ fontWeight: "bold", marginBottom: 6 }}>
-            {label}
-          </div>
-
-          <div style={{ color: "#60a5fa" }}>
-            {metricLabels[metric]}: {value}
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  // (opțional) seed inițial ca să nu fie ecran gol până vine primul WS
-  async function fetchLastOnce() {
-    const res = await fetch(`${API}/api/telemetry/last?roomId=${ROOM}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  }
-
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      try {
-        const last = await fetchLastOnce();
-        if (!alive) return;
-        setData(last);
-
-        const ms = toMs(last.ts);
-        setHistory([
-          {
-            time: new Date(ms).toLocaleTimeString(),
-            temp: last.tempC,
-            lux: last.lux,
-            power: last.powerW,
-            _ms: ms,
-          },
-        ]);
-      } catch (e) {
-        if (alive) setErr(e.message);
-      }
-    })();
-
-    // WebSocket live (Telemetry “curat” din backend: tempC/powerW/actuatorLight...)
-    const ws = new WebSocket(`${API.replace("http", "ws")}/ws-telemetry`);
-
-    ws.onopen = () => {
-      if (!alive) return;
-      console.log("WS CONNECTED");
-      setErr(null);
-    };
-
-    ws.onmessage = (ev) => {
-      if (!alive) return;
-
-      try {
-        const t = JSON.parse(ev.data);
-
-        if (t.roomId && t.roomId !== ROOM) return;
-
-        setData(t);
-
-        const ms = toMs(t.ts);
-        const point = {
-          time: new Date(ms).toLocaleTimeString(),
-          temp: t.tempC,
-          lux: t.lux,
-          power: t.powerW,
-          _ms: ms,
-        };
-
-        setHistory((prev) => {
-          const cutoff = Date.now() - rangeMin * 60 * 1000;
-
-          const kept = prev.filter((p) => (p._ms ?? 0) >= cutoff);
-
-          const last = kept[kept.length - 1];
-          if (last && last._ms === point._ms) {
-            return [...kept.slice(0, -1), point];
-          }
-
-          return [...kept, point];
-        });
-      } catch (e) {
-        console.log("WS parse error:", e);
-      }
-    };
-
-    ws.onerror = () => {
-      if (!alive) return;
-      setErr("WebSocket error");
-    };
-
-    ws.onclose = () => {
-      if (!alive) return;
-      console.log("WS CLOSED");
-    };
-
-    return () => {
-      alive = false;
-      try {
-        ws.close();
-      } catch {}
-    };
-  }, [rangeMin]);
+  const { data, err, history, chartData, toggleStatic, refreshHistory } =
+    useTelemetryWs({ api: API, room: ROOM, maxPoints: MAX_POINTS });
 
   return (
-    <div style={{ fontFamily: "Arial", padding: 24 }}>
-      <h1>Mini-BMS Dashboard</h1>
-
-      {err && (
-        <div style={{ padding: 12, border: "1px solid #ccc", marginBottom: 12 }}>
-          <b>Error:</b> {err}
-          <div style={{ marginTop: 8 }}>
-            Verifică backend-ul pe 8080 și WS /ws-telemetry.
-          </div>
-        </div>
-      )}
-
-      {!data ? (
-        <div>Loading...</div>
-      ) : (
-        <>
-          {/* CARD LIVE */}
-          <div style={{ padding: 16, border: "1px solid #ddd", borderRadius: 8, maxWidth: 520 }}>
-            <div><b>Room:</b> {data.roomId}</div>
-            <div><b>Time:</b> {String(data.ts)}</div>
-            <hr />
-
-            <div><b>Temperature:</b> {data.tempC} °C</div>
-            <div><b>Lux:</b> {data.lux}</div>
-            <div><b>Power:</b> {data.powerW} W</div>
-            <div><b>Occupied:</b> {data.occupied ? "Yes" : "No"}</div>
-            <div><b>Mode:</b> {data.mode}</div>
-
-            <h3>Actuators</h3>
-            <div><b>Light:</b> {data.actuatorLight ? "ON" : "OFF"}</div>
-            <div><b>HVAC:</b> {data.actuatorHvac ? "ON" : "OFF"}</div>
-
-            {/* RANGE selector (nu face REST, doar schimbă filtrarea locală) */}
-            <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <b>Range:</b>
-              <button onClick={() => setRangeMin(5)}>5 min</button>
-              <button onClick={() => setRangeMin(15)}>15 min</button>
-              <button onClick={() => setRangeMin(60)}>60 min</button>
-            </div>
-          </div>
-
-          {/* GRAFIC (fără ResponsiveContainer ca să evităm width(-1)) */}
-          <div style={{ marginTop: 24 }}>
-            <h2>Charts</h2>
-            <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-              <button onClick={() => setMetric("temp")}>Temperature (°C)</button>
-              <button onClick={() => setMetric("lux")}>Lux</button>
-              <button onClick={() => setMetric("power")}>Power (W)</button>
-            </div>
-
-            <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 10, overflowX: "auto" }}>
-              <LineChart width={900} height={300} data={history.map(({ _ms, ...rest }) => rest)}>
-                <CartesianGrid strokeDasharray="5 5" visibility={false}/>
-                <XAxis dataKey="time" />
-                <YAxis />
-                <Tooltip content={<CustomToolTip />} />
-                <Line
-                  type="monotone"
-                  dataKey={metric}
-                  name={metricLabels[metric]}
-                  stroke={metricColors[metric]}
-                  strokeWidth={2}
-                  dot={true}
-                />
-                <Legend></Legend>
-              </LineChart>
-            </div>
-          </div>
-        </>
-      )}
+    <div className="flex h-screen bg-gray-950 overflow-hidden">
+      <Sidebar activePage={activePage} setActivePage={setActivePage} />
+      <main className="flex-1 overflow-y-auto">
+        {activePage === "dashboard" && (
+          <Dashboard
+            data={data}
+            err={err}
+            metric={metric}
+            setMetric={setMetric}
+            metricLabels={metricLabels}
+            metricColors={metricColors}
+            chartData={chartData}
+            history={history}
+            maxPoints={MAX_POINTS}
+            isStatic={isStatic}
+            onToggleStatic={() => setIsStatic(toggleStatic())}
+            onRefresh={refreshHistory}
+          />
+        )}
+        {activePage !== "dashboard" && <PlaceholderPage name={activePage} />}
+      </main>
     </div>
   );
 }
