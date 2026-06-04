@@ -33,3 +33,5 @@ firmware/mini_bms_arduino/secrets.h
 **/*.elf
 **/*.map
 **/build/
+# Spring Boot local config
+backend/src/main/resources/application.properties
