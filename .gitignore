@@ -25,6 +25,8 @@ build/
 
 # Firmware secrets
 **/config.h
+**/secrets.h
+firmware/mini_bms_arduino/secrets.h
 
 # Arduino build outputs
 **/*.bin
