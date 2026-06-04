@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: minibms-postgres
+    environment:
+      POSTGRES_DB: minibms
+      POSTGRES_USER: minibms
+      POSTGRES_PASSWORD: minibms
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: minibms-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosqdata:/mosquitto/data
+      - mosqlog:/mosquitto/log
+
+volumes:
+  pgdata:
+  mosqdata:
+  mosqlog:

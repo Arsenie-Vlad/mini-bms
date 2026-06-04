@@ -35,3 +35,7 @@ firmware/mini_bms_arduino/secrets.h
 **/build/
 # Spring Boot local config
 backend/src/main/resources/application.properties
+**/node_modules/
+
+# Generated backend logs
+backend/bms_central_log.csv
