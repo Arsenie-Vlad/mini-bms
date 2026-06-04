@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import ro.varse.backend.domain.Telemetry;
 import ro.varse.backend.repository.TelemetryRepository;
+import ro.varse.backend.service.ClimateModeService;
+import ro.varse.backend.service.CsvLogService;
 import ro.varse.backend.ws.TelemetryWsHandler;
 
 import jakarta.annotation.PostConstruct;
@@ -20,7 +22,9 @@ public class MqttTelemetryListener {
 
     private final TelemetryRepository repo;
     private final TelemetryWsHandler wsHandler;
-    private final ObjectMapper mapper;   // Injectat de Spring
+    private final ObjectMapper mapper;
+    private final CsvLogService csvLogService;
+    private final ClimateModeService climateModeService;
 
     @Value("${mqtt.host}")
     private String mqttHost;
@@ -31,16 +35,23 @@ public class MqttTelemetryListener {
     @Value("${mqtt.topicTelemetry}")
     private String topicTelemetry;
 
+    @Value("${mqtt.topicLog:miniBMS/room1/log}")
+    private String topicLog;
+
     private MqttClient client;
 
     public MqttTelemetryListener(
             TelemetryRepository repo,
             TelemetryWsHandler wsHandler,
-            ObjectMapper mapper
+            ObjectMapper mapper,
+            CsvLogService csvLogService,
+            ClimateModeService climateModeService
     ) {
         this.repo = repo;
         this.wsHandler = wsHandler;
         this.mapper = mapper;
+        this.csvLogService = csvLogService;
+        this.climateModeService = climateModeService;
     }
 
     @PostConstruct
@@ -60,7 +71,8 @@ public class MqttTelemetryListener {
                 System.out.println("MQTT connectComplete (reconnect=" + reconnect + ")");
                 try {
                     client.subscribe(topicTelemetry, 0);
-                    System.out.println("MQTT subscribed to " + topicTelemetry);
+                    client.subscribe(topicLog, 0);
+                    System.out.println("MQTT subscribed to " + topicTelemetry + " and " + topicLog);
                 } catch (Exception e) {
                     System.out.println("MQTT subscribe failed: " + e.getMessage());
                 }
@@ -75,10 +87,14 @@ public class MqttTelemetryListener {
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
 
-                Telemetry saved = saveTelemetryFromJson(payload);
-
-                // Trimitem Telemetry "curat" către WebSocket
-                wsHandler.broadcast(mapper.writeValueAsString(saved));
+                if (topic.equals(topicTelemetry)) {
+                    climateModeService.processTelemetryJson(payload);
+                    Telemetry saved = saveTelemetryFromJson(payload);
+                    wsHandler.broadcast(mapper.writeValueAsString(saved));
+                } else if (topic.equals(topicLog)) {
+                    climateModeService.processCsvLog(payload);
+                    csvLogService.appendLog(payload);
+                }
             }
 
             @Override
@@ -87,7 +103,6 @@ public class MqttTelemetryListener {
         });
 
         client.connect(options);
-
         System.out.println("MQTT connected to " + mqttHost + " (subscribe in connectComplete)");
     }
 
